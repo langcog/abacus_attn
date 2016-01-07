@@ -1,0 +1,384 @@
+---
+title: "Abacus Attention"
+author: "Srinivasan, Wagner, Frank, Barner"
+date: "January 6, 2016"
+output: 
+  html_document:
+    toc: yes
+    number_sections: yes
+---
+
+<style type="text/css">
+body, td {
+   font-size: 14px;
+}
+code {
+  font-size: 11px;
+}
+pre {
+  font-size: 11px;
+}
+</style>
+
+Preliminaries.
+
+```{r}
+rm(list=ls())
+suppressPackageStartupMessages(c("dplyr","langcog","tidyr","ggplot2","lme4"))
+library(dplyr)
+library(ggplot2)
+library(langcog)
+library(magrittr)
+library(lme4)
+library(knitr)
+opts_chunk$set(fig.width=8, fig.height=5, 
+                      echo=TRUE, warning=FALSE, message=FALSE, cache=TRUE)
+theme_set(theme_bw())
+```
+
+# Experiment 1: Experts with dual task
+
+## Data prep
+
+Read data. 
+
++ Heaven/Earth 0=Heaven; 1=Earth
++ Condition: 1= In Play; 2=Out of play; 3=leading; 4=trailing
++ Number Requested, 
++ "X: 1=Left most column, counting to the right to max of 2 or 3","Y: 1 equals top row (i.e., out of play heavenly bead), counting downwards to 7."
++ Correct on Search task? Trials weith incorrect search responses were excluded from analysis
++ RT
++ Abacus entered: Only relevent to dual task,
++ Correct on Abacus: only relevent to dual task
++ "Number of columns: occasionally you will see 0s in this column, this means the participant was in a pilot version with 4 columns and should be excluded. "
++ Subject Number: Assigned when extracted from .mat instead of alpha numeric number to make some things in life easier,
++ <3Std Dev: removing outliers (2s). Calculated in linear space. Needs to be redone in log space,
++ Inout or Leading trailing trial,
++ Expertise level: ranges from 0 (none) to 2(has used abacus)
+
+```{r}
+dual_experts_raw <- read.csv("data/Upright dual data experts.csv")
+names(dual_experts_raw) <- c("bead_type", "condition", "number_requested", 
+                             "X_pos","Y_pos","search_correct","RT",
+                             "abacus_val","abacus_correct","n_col",
+                             "subnum","outlier","trial_type")
+dual_experts_raw %<>% 
+  mutate(bead_type = factor(bead_type, 
+                            levels = c(0,1), 
+                            labels = c("heaven","earth")),
+         condition = factor(condition, 
+                            levels = c(1,2,3,4), 
+                            labels = c("in play", "out of play", 
+                                       "leading","trailing")))
+```
+
+Exclusions. Filter pilot participants. 
+
+```{r}
+pilot_subs <- dual_experts_raw %>%
+  group_by(subnum) %>%
+  summarise(pilot = any(n_col == 0)) %>%
+  filter(pilot) 
+  
+dual_experts <- filter(dual_experts_raw, 
+                       !subnum %in% pilot_subs$subnum)
+dual_experts %<>% 
+  group_by(subnum) %>%
+  mutate(trial_num = 1:n())
+```
+
+Check to make sure we have a consistent number of trials, no training trials. 
+
+```{r}
+qplot(subnum, trial_num, data = dual_experts)
+```
+
+In this dataset we appear to be missing the end of a few participants.
+
+Next, RT exclusions. Note that there are a few 0 RTs. What's the deal with these?
+
+```{r}
+sum(dual_experts$RT == 0)
+dual_experts %<>% filter(RT > 0, 
+                         !is.na(RT))
+```
+
+Linear space. 
+
+```{r}
+qplot(RT, data = dual_experts, 
+      fill = RT > mean(RT) + 3*sd(RT))
+mean(dual_experts$RT)
+median(dual_experts$RT)
+```
+
+Log space looks better.
+
+```{r}
+qplot(log(RT), data = dual_experts, 
+      fill = log(RT) > mean(log(RT)) + 3*sd(log(RT)) |
+        log(RT) < mean(log(RT)) - 3*sd(log(RT)))
+```
+
+Clip these.
+
+```{r}
+lmean <- mean(log(dual_experts$RT))
+lsd <- sd(log(dual_experts$RT))
+dual_experts$RT[log(dual_experts$RT) > lmean + 3*lsd |
+                  log(dual_experts$RT) < lmean - 3*lsd] <- NA
+```
+
+Replot in linear space just to check. 
+
+```{r}
+qplot(RT, data = dual_experts)
+```
+
+Looks good. 
+
+## RT and accuracy analyses
+
+Basic analyses.
+
+```{r}
+ms <- dual_experts %>%
+  filter(abacus_correct == 1, 
+         search_correct == 1) %>%
+  group_by(subnum, condition) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) 
+```
+
+Add two other variables: bead type and number of columns. 
+
+```{r}
+ms <- dual_experts %>%
+  filter(abacus_correct == 1, 
+         search_correct == 1) %>%
+  group_by(subnum, condition, bead_type, n_col) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, bead_type, n_col) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid(bead_type ~ n_col)
+```
+
+It's clear that the effects are being driven by the 2-column displays, and especiallywith the earthly beads. (Though there are probably fewer heavenly bead trials, no?).
+
+## Stats 
+
+Basic LMER confirms highly significant effects for in/out of play, and leading/trailing. Could do better parameterization, but this is still very clear. More random effects don't converge. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition + 
+                     (condition | subnum), 
+                   data = filter(dual_experts, 
+                                 search_correct == 1, 
+                                 abacus_correct == 1)))$coefficients, digits = 3)
+```
+
+Now add number of columns. Doesn't converge with number of columns in random effects. This is also strong and clear, and the interactions suggest that all of this gets essentially canceled out in the three-column condition. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) + 
+                     (condition | subnum), 
+                   data = filter(dual_experts, 
+                                 search_correct == 1, 
+                                 abacus_correct == 1)))$coefficients, digits = 3)
+```
+ 
+# Experiment 2: Experts with no dual task
+
+## Data prep
+
+Read data. 
+
+```{r}
+single_experts_raw <- read.csv("data/Upright Single Task Expert Data.csv")
+names(single_experts_raw) <- c("bead_type", "condition", "number_requested", 
+                             "X_pos","Y_pos","search_correct","RT",
+                             "abacus_val","abacus_correct","n_col",
+                             "subnum","outlier","trial_type")
+single_experts_raw %<>% 
+  mutate(bead_type = factor(bead_type, 
+                            levels = c(0,1), 
+                            labels = c("heaven","earth")),
+         condition = factor(condition, 
+                            levels = c(1,2,3,4), 
+                            labels = c("in play", "out of play", 
+                                       "leading","trailing")))
+```
+
+Exclusions. Filter pilot participants. 
+
+```{r}
+pilot_subs <- single_experts_raw %>%
+  group_by(subnum) %>%
+  summarise(pilot = any(n_col == 0)) %>%
+  filter(pilot) 
+  
+single_experts <- filter(single_experts_raw, 
+                       !subnum %in% pilot_subs$subnum)
+single_experts %<>% 
+  group_by(subnum) %>%
+  mutate(trial_num = 1:n())
+```
+
+Check to make sure we have a consistent number of trials, no training trials. 
+
+```{r}
+qplot(subnum, trial_num, data = single_experts)
+```
+
+All participants have full data. 
+
+RT exclusions. Note that there are a few 0 RTs. What's the deal with these?
+
+```{r}
+sum(single_experts$RT == 0)
+single_experts %<>% filter(RT > 0, 
+                         !is.na(RT))
+```
+
+Again clip in log space. 
+
+```{r}
+qplot(log(RT), data = single_experts, 
+      fill = log(RT) > mean(log(RT)) + 3*sd(log(RT)) |
+        log(RT) < mean(log(RT)) - 3*sd(log(RT)))
+```
+
+Clip these.
+
+```{r}
+lmean <- mean(log(single_experts$RT))
+lsd <- sd(log(single_experts$RT))
+single_experts$RT[log(single_experts$RT) > lmean + 3*lsd |
+                  log(single_experts$RT) < lmean - 3*lsd] <- NA
+```
+
+Replot in linear space just to check. 
+
+```{r}
+qplot(RT, data = single_experts)
+```
+
+Looks good. 
+
+## RT and accuracy analyses
+
+Basic analyses.
+
+```{r}
+ms <- single_experts %>%
+  filter(search_correct == 1) %>%
+  group_by(subnum, condition) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) 
+```
+
+Add two other variables: bead type and number of columns. 
+
+```{r}
+ms <- single_experts %>%
+  filter(search_correct == 1) %>%
+  group_by(subnum, condition, bead_type, n_col) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, bead_type, n_col) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid(bead_type ~ n_col)
+```
+
+Now in this experiment, we're actually seeing effects in the three-column case. That suggests that it was the load of the three-column abacus reading that was suppressing the attentional effects, which is actually kind of nice and interesting.  
+
+## Stats 
+
+Same LMER as before. This time the model didn't converge with random condition effects. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition + 
+                     (1 | subnum), 
+                   data = filter(single_experts, 
+                                 search_correct == 1)))$coefficients, 
+      digits = 3)
+```
+
+Now add number of columns again. Here there are no interactions, which is clear and nice. Interestingly, now the model will converge with condition in the random effects. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) + 
+                     (condition | subnum), 
+                   data = filter(single_experts, 
+                                 search_correct == 1)))$coefficients, digits = 3)
+```
+ 
+# Experiment 1 and 2 together
+
+Bind everything together. 
+
+```{r}
+experts <- bind_rows(filter(single_experts,
+                            search_correct ==1) %>%
+                       mutate(expt = "single task", 
+                              group = "experts"),
+                     filter(dual_experts, 
+                            search_correct == 1, 
+                            abacus_correct == 1) %>%
+                       mutate(expt = "dual task", 
+                              group = "experts"))
+```
+
+## Visualization
+
+We don't learn much more this way, but we can plot everything together
+
+```{r}
+ms <- experts %>%
+  group_by(subnum, condition, expt) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, expt) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid(~expt)
+```
+
+## Stats
+
+Model the whole thing together. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ expt * trial_num + expt * condition + 
+                     (condition | subnum), 
+                   data = filter(experts)))$coefficients, 
+      digits = 3)
+```
+ 
+This is very interpretable: 
++ the single task is faster than dual, 
++ you get faster as you continue doing the tasks
++ you don't improve as much with repeated trials in the single task (because you're not getting faster at reading the abacus)
++ there are effects of in vs. out of play and leading vs. following
++ there are no interactions with task. 
+
+Awesome.
