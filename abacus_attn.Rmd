@@ -2,10 +2,12 @@
 title: "Abacus Attention"
 author: "Srinivasan, Wagner, Frank, Barner"
 date: "January 6, 2016"
-output: 
+output:
   html_document:
-    toc: yes
     number_sections: yes
+    toc: yes
+  pdf_document:
+    toc: yes
 ---
 
 <style type="text/css">
@@ -24,12 +26,11 @@ Preliminaries.
 
 ```{r}
 rm(list=ls())
-suppressPackageStartupMessages(c("dplyr","langcog","tidyr","ggplot2","lme4"))
-library(dplyr)
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(langcog))
+suppressPackageStartupMessages(library(lme4))
 library(ggplot2)
-library(langcog)
 library(magrittr)
-library(lme4)
 library(knitr)
 opts_chunk$set(fig.width=8, fig.height=5, 
                       echo=TRUE, warning=FALSE, message=FALSE, cache=TRUE)
@@ -40,12 +41,13 @@ theme_set(theme_bw())
 
 ## Data prep
 
-Read data. 
+Read data. Coding info from Katie. 
 
 + Heaven/Earth 0=Heaven; 1=Earth
 + Condition: 1= In Play; 2=Out of play; 3=leading; 4=trailing
 + Number Requested, 
-+ "X: 1=Left most column, counting to the right to max of 2 or 3","Y: 1 equals top row (i.e., out of play heavenly bead), counting downwards to 7."
++ X: 1=Left most column, counting to the right to max of 2 or 3",
++ Y: 1 equals top row (i.e., out of play heavenly bead), counting downwards to 7.
 + Correct on Search task? Trials weith incorrect search responses were excluded from analysis
 + RT
 + Abacus entered: Only relevent to dual task,
@@ -330,7 +332,7 @@ kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) +
                                  search_correct == 1)))$coefficients, digits = 3)
 ```
  
-# Experiment 1 and 2 together
+# Experiments 1 and 2 together
 
 Bind everything together. 
 
@@ -375,10 +377,312 @@ kable(summary(lmer(log(RT) ~ expt * trial_num + expt * condition +
 ```
  
 This is very interpretable: 
-+ the single task is faster than dual, 
-+ you get faster as you continue doing the tasks
-+ you don't improve as much with repeated trials in the single task (because you're not getting faster at reading the abacus)
-+ there are effects of in vs. out of play and leading vs. following
-+ there are no interactions with task. 
+
+* the single task is faster than dual, 
+* you get faster as you continue doing the tasks
+* you don't improve as much with repeated trials in the single task (because you're not getting faster at reading the abacus)
+* there are effects of in vs. out of play and leading vs. following
+* there are no interactions with task. 
 
 Awesome.
+
+# Experiment 3: Naive participants, single task
+
+## Data prep
+
+Read data. 
+
+```{r}
+naive_raw <- read.csv("data/UprightAdultData.csv")
+names(naive_raw) <- c("bead_type", "condition", "number_requested", 
+                             "X_pos","Y_pos","search_correct","RT",
+                             "abacus_val","abacus_correct","n_col",
+                             "subnum","outlier","trial_type", "expertise")
+naive_raw %<>% 
+  mutate(bead_type = factor(bead_type, 
+                            levels = c(0,1), 
+                            labels = c("heaven","earth")),
+         condition = factor(condition, 
+                            levels = c(1,2,3,4), 
+                            labels = c("in play", "out of play", 
+                                       "leading","trailing")))
+```
+
+Exclusions. Filter pilot participants. 
+
+```{r}
+pilot_subs <- naive_raw %>%
+  group_by(subnum) %>%
+  summarise(pilot = any(n_col == 0)) %>%
+  filter(pilot) 
+  
+naive <- filter(naive_raw, 
+                !subnum %in% pilot_subs$subnum)
+naive %<>% 
+  group_by(subnum) %>%
+  mutate(trial_num = 1:n())
+```
+
+Check to make sure we have a consistent number of trials, no training trials. 
+
+```{r}
+qplot(subnum, trial_num, data = naive)
+```
+
+All participants have full data. 
+
+RT exclusions. Again clip in log space. 
+
+```{r}
+qplot(log(RT), data = naive, 
+      fill = log(RT) > mean(log(RT)) + 3*sd(log(RT)) |
+        log(RT) < mean(log(RT)) - 3*sd(log(RT)))
+```
+
+Clip these.
+
+```{r}
+lmean <- mean(log(naive$RT))
+lsd <- sd(log(naive$RT))
+naive$RT[log(naive$RT) > lmean + 3*lsd |
+           log(naive$RT) < lmean - 3*lsd] <- NA
+```
+
+Replot in linear space just to check. 
+
+```{r}
+qplot(RT, data = naive)
+```
+
+Looks good. 
+
+## RT and accuracy analyses
+
+Basic analyses. Summary: In this experiment, the effects are smaller, but still present, at all column levels. 
+
+```{r}
+ms <- naive %>%
+  filter(search_correct == 1) %>%
+  group_by(subnum, condition) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) 
+```
+
+Add two other variables: bead type and number of columns. 
+
+```{r}
+ms <- naive %>%
+  filter(search_correct == 1) %>%
+  group_by(subnum, condition, bead_type, n_col) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, bead_type, n_col) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid(bead_type ~ n_col)
+```
+
+Add abacus expertise instead. 
+
+```{r}
+ms <- naive %>%
+  filter(search_correct == 1) %>%
+  group_by(subnum, condition, expertise) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, expertise) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid(. ~ expertise)
+```
+
+## Stats 
+
+Same LMER as in the previous two, with the full random effects structure. This model shows both effects, as before. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition + 
+                     (condition | subnum), 
+                   data = filter(naive, 
+                                 search_correct == 1)))$coefficients, 
+      digits = 3)
+```
+
+Now add number of columns again. Here again there are no interactions, suggesting that column didn't affect matters. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) + 
+                     (condition | subnum), 
+                   data = filter(naive, 
+                                 search_correct == 1)))$coefficients, digits = 3)
+```
+
+And check for interactions of expertise level. First with expertise as a continuous variable. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition * expertise + 
+                     (condition | subnum), 
+                   data = filter(naive, 
+                                 search_correct == 1)))$coefficients, digits = 3)
+```
+
+Now with expertise as a factor. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition * factor(expertise) + 
+                     (condition | subnum), 
+                   data = filter(naive, 
+                                 search_correct == 1)))$coefficients, digits = 3)
+```
+
+In both cases, we see a slightly bigger effect of leading zeros being slower for the participants with more abacus exposure. This is not totally unreasonable, but it's a small effect. 
+
+# Experiments 2 and 3 
+
+Bind all data.
+
+```{r}
+d <- bind_rows(filter(naive, 
+                      search_correct == 1) %>%
+                 mutate(expt = "single task",
+                        group = "naive"), 
+               experts)
+```
+
+Now plot.
+
+```{r}
+ms <- d %>%
+  filter(expt == "single task") %>%
+  group_by(subnum, condition, group) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, group) %>%
+  multi_boot_standard(col = "RT")
+
+ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid( ~ group)
+```
+
+And a statistical model.
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition * group + 
+                     (condition | subnum), 
+                   data = filter(d, 
+                                 expt == "single task")))$coefficients, 
+      digits = 3)
+```
+ 
+Summary - experts are *way* slower than naive participants, even when they don't have the dual task. That's interesting, I think - they are still processing the abacus somehow prior to searching.
+
+There's not much in the way of interactions of the effects with group, with one exception. The naive participants don't show as big an "out of play" effect as the experts, trending with p = `r 2*pnorm(-1.95)`. So there may be some small difference there. 
+ 
+# All data
+
+## Basic stats
+
+Consolidate all data into a single model. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num * group * expt + 
+                     condition * group * expt + 
+                     (condition | subnum), 
+                   data = d))$coefficients, 
+      digits = 3)
+```
+
+In the full model we see all the effects holding up, with not much evidence for interactions of expertise or experiment type. That's pretty much exactly what we thought was going on. 
+
+## Post-hoc analysis: Targets closer to the beam
+
+Does position mediate the "in play/out of play" effect?
+
+First, the baseline model for this analysis: only earthly beads (since heavenly bead position and "in play" is confounded. 
+
+There's an interesting decision to make here in the random effects. I think it's best to go with no condition or Y_pos random effect both for convergence reasons and ebcause it's hard theoretically to interpret when you have all the interactions here. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num * group * expt + 
+                     condition * group * expt + 
+                     (1 | subnum), 
+                   data = filter(d, 
+                                 condition %in% c("in play","out of play"),
+                                 bead_type == "earth")))$coefficients, 
+      digits = 3)
+
+```
+
+Next, add vertical position as a predictor. 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num * group * expt + 
+                     condition * group * expt + 
+                     Y_pos * group * expt + 
+                     (1 | subnum), 
+                   data = filter(d, 
+                                 condition %in% c("in play","out of play"),
+                                 bead_type == "earth")))$coefficients, 
+      digits = 3)
+
+```
+
+Now we see a significant effect of Y position with no remaining effect of "out of play." Check for interactions? 
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num * group * expt + 
+                     Y_pos * group * expt * condition + 
+                     (1 | subnum), 
+                   data = filter(d, 
+                                 condition %in% c("in play","out of play"),
+                                 bead_type == "earth")))$coefficients, 
+      digits = 3)
+
+```
+
+Interestingly, we are seeing some three-way interactions, but these are a bit hard to interpret. Let's subset to Experiments 1, 2, and 3.
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + 
+                     Y_pos * condition + 
+                     (1 | subnum), 
+                   data = filter(d, 
+                                 group == "experts", 
+                                 expt == "dual task",
+                                 condition %in% c("in play","out of play"),
+                                 bead_type == "earth")))$coefficients, 
+      digits = 3)
+
+kable(summary(lmer(log(RT) ~ trial_num + 
+                     Y_pos * condition + 
+                     (1 | subnum), 
+                   data = filter(d, 
+                                 group == "experts", 
+                                 expt == "single task",
+                                 condition %in% c("in play","out of play"),
+                                 bead_type == "earth")))$coefficients, 
+      digits = 3)
+
+kable(summary(lmer(log(RT) ~ trial_num + 
+                     Y_pos * condition + 
+                     (1 | subnum), 
+                   data = filter(d, 
+                                 group == "naive", 
+                                 expt == "single task",
+                                 condition %in% c("in play","out of play"),
+                                 bead_type == "earth")))$coefficients, 
+      digits = 3)
+
+```
+
+So we see the same unpredicted effect in Experiment 2 as in the previous analysis. 
