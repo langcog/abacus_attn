@@ -29,6 +29,7 @@ rm(list=ls())
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(langcog))
 suppressPackageStartupMessages(library(lme4))
+suppressPackageStartupMessages(library(lmerTest))
 library(ggplot2)
 library(magrittr)
 library(knitr)
@@ -139,6 +140,23 @@ qplot(RT, data = dual_experts)
 
 Looks good. 
 
+## Demographics and descriptives
+
+```{r}
+kable(dual_experts %>% 
+        group_by(subnum) %>% 
+        summarise(n = n()) %>% 
+        summarise(n = n()))
+```
+
+```{r}
+kable(dual_experts %>% 
+        group_by(subnum) %>% 
+        summarise(RT = mean(RT, na.rm=TRUE)) %>% 
+        mutate(condition = "all") %>% group_by(condition) %>%
+        multi_boot_standard(col = "RT"))
+```
+
 ## RT and accuracy analyses
 
 Basic analyses.
@@ -151,6 +169,8 @@ ms <- dual_experts %>%
   summarise(RT = mean(RT, na.rm=TRUE)) %>%
   group_by(condition) %>%
   multi_boot_standard(col = "RT")
+
+kable(ms, digits = 2)
 
 ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
@@ -168,6 +188,8 @@ ms <- dual_experts %>%
   group_by(condition, bead_type, n_col) %>%
   multi_boot_standard(col = "RT")
 
+kable(ms, digits = 2)
+
 ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
@@ -175,6 +197,27 @@ ggplot(ms,aes(x = condition, y = mean, fill = condition)) +
 ```
 
 It's clear that the effects are being driven by the 2-column displays, and especiallywith the earthly beads. (Though there are probably fewer heavenly bead trials, no?).
+
+Order effects.
+
+```{r}
+ms <- dual_experts %>%
+  filter(abacus_correct == 1, 
+         search_correct == 1) %>%
+  mutate(second_half = trial_num > 64) %>%
+  group_by(subnum, condition, second_half) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, second_half) %>%
+  multi_boot_standard(col = "RT")
+
+kable(ms, digits = 2)
+
+ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  facet_wrap(~second_half) + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) 
+```
+
 
 ## Stats 
 
@@ -192,6 +235,17 @@ Now add number of columns. Doesn't converge with number of columns in random eff
 
 ```{r}
 kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) + 
+                     (condition | subnum), 
+                   data = filter(dual_experts, 
+                                 search_correct == 1, 
+                                 abacus_correct == 1)))$coefficients, digits = 3)
+```
+
+Is there an order effect?
+
+```{r}
+dual_experts$second_half <- dual_experts$trial_num > 64
+kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) * second_half + 
                      (condition | subnum), 
                    data = filter(dual_experts, 
                                  search_correct == 1, 
@@ -276,6 +330,23 @@ qplot(RT, data = single_experts)
 
 Looks good. 
 
+## Demographics and descriptives
+
+```{r}
+kable(single_experts %>% 
+        group_by(subnum) %>% 
+        summarise(n = n()) %>% 
+        summarise(n = n()))
+```
+
+```{r}
+kable(single_experts %>% 
+        group_by(subnum) %>% 
+        summarise(RT = mean(RT, na.rm=TRUE)) %>% 
+        mutate(condition = "all") %>% group_by(condition) %>%
+        multi_boot_standard(col = "RT"))
+```
+
 ## RT and accuracy analyses
 
 Basic analyses.
@@ -287,6 +358,8 @@ ms <- single_experts %>%
   summarise(RT = mean(RT, na.rm=TRUE)) %>%
   group_by(condition) %>%
   multi_boot_standard(col = "RT")
+
+kable(ms, digits = 2)
 
 ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
@@ -302,6 +375,8 @@ ms <- single_experts %>%
   summarise(RT = mean(RT, na.rm=TRUE)) %>%
   group_by(condition, bead_type, n_col) %>%
   multi_boot_standard(col = "RT")
+
+kable(ms, digits = 2)
 
 ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
@@ -456,6 +531,24 @@ qplot(RT, data = naive)
 
 Looks good. 
 
+
+## Demographics and descriptives
+
+```{r}
+kable(naive %>% 
+        group_by(subnum) %>% 
+        summarise(n = n()) %>% 
+        summarise(n = n()))
+```
+
+```{r}
+kable(naive %>% 
+        group_by(subnum) %>% 
+        summarise(RT = mean(RT, na.rm=TRUE)) %>% 
+        mutate(condition = "all") %>% group_by(condition) %>%
+        multi_boot_standard(col = "RT"))
+```
+
 ## RT and accuracy analyses
 
 Basic analyses. Summary: In this experiment, the effects are smaller, but still present, at all column levels. 
@@ -467,6 +560,8 @@ ms <- naive %>%
   summarise(RT = mean(RT, na.rm=TRUE)) %>%
   group_by(condition) %>%
   multi_boot_standard(col = "RT")
+
+kable(ms, digits = 2)
 
 ggplot(ms,aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
@@ -483,6 +578,8 @@ ms <- naive %>%
   group_by(condition, bead_type, n_col) %>%
   multi_boot_standard(col = "RT")
 
+kable(ms, digits = 2)
+
 ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
@@ -498,6 +595,8 @@ ms <- naive %>%
   summarise(RT = mean(RT, na.rm=TRUE)) %>%
   group_by(condition, expertise) %>%
   multi_boot_standard(col = "RT")
+
+kable(ms, digits = 2)
 
 ggplot(ms, aes(x = condition, y = mean, fill = condition)) + 
   geom_bar(stat = "identity") + 
@@ -546,6 +645,17 @@ kable(summary(lmer(log(RT) ~ trial_num + condition * factor(expertise) +
 
 In both cases, we see a slightly bigger effect of leading zeros being slower for the participants with more abacus exposure. This is not totally unreasonable, but it's a small effect. 
 
+Finally, check a followup model for only zero expertise subjects. Does not converge with random slope.
+
+```{r}
+kable(summary(lmer(log(RT) ~ trial_num + condition + 
+                     (1 | subnum), 
+                   data = filter(naive, 
+                                 expertise == 0,
+                                 search_correct == 1)))$coefficients, digits = 3)
+```
+
+
 # Experiments 2 and 3 
 
 Bind all data.
@@ -589,6 +699,69 @@ Summary - experts are *way* slower than naive participants, even when they don't
 There's not much in the way of interactions of the effects with group, with one exception. The naive participants don't show as big an "out of play" effect as the experts, trending with p = `r 2*pnorm(-1.95)`. So there may be some small difference there. 
  
 # All data
+
+## Plots for paper
+
+```{r}
+ms <- d %>%
+  group_by(subnum, condition, expt, expertise, group) %>%
+  summarise(RT = mean(RT, na.rm=TRUE)) %>%
+  group_by(condition, expt, expertise, group) %>%
+  multi_boot_standard(col = "RT")
+```
+
+First in-play/out-of-play.
+
+```{r}
+ggplot(filter(ms, group=="experts", 
+              condition == "in play" | condition == "out of play"), 
+       aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid( ~ expt) + 
+  theme_mikabr() + 
+  scale_fill_solarized()
+```
+
+Then trailing/leading.
+
+```{r}
+ggplot(filter(ms, group=="experts", 
+              condition == "leading" | condition == "trailing"), 
+       aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid( ~ expt) + 
+  theme_mikabr() + 
+  scale_fill_solarized()
+```
+
+Then the same in/out of play by expertise.
+
+```{r}
+ggplot(filter(ms, group=="naive", 
+              condition == "in play" | condition == "out of play"), 
+       aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid( ~ expertise) + 
+  theme_mikabr() + 
+  scale_fill_solarized()
+```
+
+and leading/trailing by expertise.
+
+```{r}
+ms$expertise <- factor(ms$expertise, levels = c(0, 1, 2), labels = c("No experience","Recognition only","Experience using"))
+ggplot(filter(ms, group=="naive", 
+              condition == "leading" | condition == "trailing"), 
+       aes(x = condition, y = mean, fill = condition)) + 
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) + 
+  facet_grid( ~ expertise) + 
+  theme_mikabr() + 
+  scale_fill_solarized()
+```
 
 ## Basic stats
 
