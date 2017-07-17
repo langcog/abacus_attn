@@ -1,7 +1,7 @@
 ---
 title: "Abacus Attention"
 author: "Srinivasan, Wagner, Frank, Barner"
-date: "January 6, 2016"
+date: "January 6, 2016 (revised July 17, 2017)"
 output:
   html_document:
     number_sections: yes
@@ -34,6 +34,7 @@ library(ggplot2)
 library(magrittr)
 library(knitr)
 library(tidyr)
+library(BayesFactor)
 opts_chunk$set(fig.width=8, fig.height=5, 
                       echo=TRUE, warning=FALSE, message=FALSE, cache=TRUE)
 theme_set(theme_bw())
@@ -413,7 +414,7 @@ kable(summary(lmer(log(RT) ~ trial_num + condition * factor(n_col) +
  
 # Experiments 1 and 2 together
 
-Bind everything together. 
+Bind everything together. Note that we filter correct search trials here rather than in models below. 
 
 ```{r}
 experts <- bind_rows(filter(single_experts,
@@ -466,6 +467,62 @@ This is very interpretable:
 * there are no interactions with task. 
 
 Awesome.
+
+## Stats - Bayesian
+
+Because there is no interaction of conditon and task, we interpret as similar attentional biases. But this is technically an inference from null. 
+
+Thus, we move to a Bayesian framework to quantify evidence for null. First we shift to a (frequentist) ANOVA (over condition means) and then compute BFs.
+
+```{r}
+anova_data <- experts %>%
+  ungroup %>%
+  mutate(subnum = factor(subnum), 
+         expt = factor(expt)) %>%
+  group_by(expt, condition, subnum) %>%
+  summarise(log_rt = mean(log(RT), na.rm=TRUE))
+
+aov_mod <- aov(log_rt ~ expt * condition + Error(subnum), data = anova_data)
+
+summary(aov_mod)
+```
+
+Interpretation is identical, there are main effects of experiment and condition, with no interaction. Now for BF. (Note `BayesFactor` package not compatible with `tibble`). 
+
+```{r}
+anovaBF(log_rt ~ expt * condition + subnum, 
+        data = as.data.frame(anova_data), 
+        whichRandom = "subnum", 
+        whichModels = "top")
+```
+
+We are seeing substantial evidence in this analysis FOR the omission of `condition:experiment` (BF > 10). 
+
+Let's try this in the `lmBF` framework as well. 
+
+```{r}
+lmbf_data <- experts %>%
+  ungroup %>%
+  mutate(subnum = factor(subnum), 
+         expt = factor(expt), 
+         log_rt = log(RT))  %>%
+  filter(!is.na(log_rt)) 
+  
+lm_mod <- lmBF(log_rt ~ expt * trial_num + expt * condition, 
+               data = as.data.frame(lmbf_data), 
+               whichRandom = "subnum")
+lm_mod
+
+lm_mod_nointeraction <- lmBF(log_rt ~ expt * trial_num + expt + condition, 
+               data = as.data.frame(lmbf_data), 
+               whichRandom = "subnum")
+lm_mod_nointeraction
+
+lm_mod / lm_mod_nointeraction
+```
+
+Very consistent. 
+
 
 ## Order effects
 
@@ -705,6 +762,38 @@ kable(summary(lmer(log(RT) ~ trial_num + condition +
                                  search_correct == 1)))$coefficients, digits = 3)
 ```
 
+## Bayesian stats
+
+We focus here on the question of expertise interactions.
+
+```{r}
+# model of interest
+# log(RT) ~ trial_num + condition * expertise + 
+#                      (condition | subnum), 
+#                    data = filter(naive, 
+#                                  search_correct == 1)
+
+
+lmbf_data <- naive %>%
+  filter(search_correct == 1) %>%
+  ungroup %>%
+  mutate(subnum = factor(subnum), 
+         log_rt = log(RT)) %>%
+  filter(!is.na(log_rt))
+  
+lm_mod <- lmBF(log_rt ~ trial_num + condition * expertise, 
+               data = as.data.frame(lmbf_data), 
+               whichRandom = "subnum")
+lm_mod
+
+lm_mod_nointeraction <- lmBF(log_rt ~ trial_num + condition + expertise, 
+               data = as.data.frame(lmbf_data), 
+               whichRandom = "subnum")
+lm_mod_nointeraction
+
+lm_mod / lm_mod_nointeraction
+```
+
 
 # Experiments 2 and 3 
 
@@ -747,6 +836,36 @@ kable(summary(lmer(log(RT) ~ trial_num + condition * group +
 Summary - experts are *way* slower than naive participants, even when they don't have the dual task. That's interesting, I think - they are still processing the abacus somehow prior to searching.
 
 There's not much in the way of interactions of the effects with group, with one exception. The naive participants don't show as big an "out of play" effect as the experts, trending with p = `r 2*pnorm(-1.95)`. So there may be some small difference there. 
+
+## Bayesian version
+
+```{r}
+# model of interest
+# lmer(log(RT) ~ trial_num + condition * group + 
+#                      (condition | subnum), 
+#                    data = filter(d, 
+#                                  expt == "single task")
+
+lmbf_data <- d %>%
+  filter(expt == "single task") %>%
+  ungroup %>%
+  mutate(subnum = factor(subnum), 
+         log_rt = log(RT), 
+         group = factor(group)) %>%
+  filter(!is.na(log_rt))
+  
+lm_mod <- lmBF(log_rt ~ trial_num + condition * group, 
+               data = as.data.frame(lmbf_data), 
+               whichRandom = "subnum")
+lm_mod
+
+lm_mod_nointeraction <- lmBF(log_rt ~ trial_num + condition + group, 
+               data = as.data.frame(lmbf_data), 
+               whichRandom = "subnum")
+lm_mod_nointeraction
+
+lm_mod / lm_mod_nointeraction
+```
  
 # All data
 
@@ -833,7 +952,7 @@ Does position mediate the "in play/out of play" effect?
 
 First, the baseline model for this analysis: only earthly beads (since heavenly bead position and "in play" is confounded. 
 
-There's an interesting decision to make here in the random effects. I think it's best to go with no condition or Y_pos random effect both for convergence reasons and ebcause it's hard theoretically to interpret when you have all the interactions here. 
+There's an interesting decision to make here in the random effects. I think it's best to go with no condition or Y_pos random effect both for convergence reasons and because it's hard theoretically to interpret when you have all the interactions here. 
 
 ```{r}
 kable(summary(lmer(log(RT) ~ trial_num * group * expt + 
@@ -909,3 +1028,35 @@ kable(summary(lmer(log(RT) ~ trial_num +
 ```
 
 So we see the same unpredicted effect in Experiment 2 as in the previous analysis. 
+
+## Post-hoc analysis: X position / RVF effects
+
+`X_pos` is 1 for left-most position. `VF` is a variable that maps further right displays to higher numbers. 
+
+```{r}
+d$VF <- d$X_pos - ((d$n_col / 2) + .5)
+ggplot(d, 
+       aes(x = VF, y = log(RT), col = factor(n_col))) + 
+  geom_jitter(alpha = .02) + 
+  geom_smooth(method = "lm") + 
+  facet_grid(condition ~ expt) + 
+  ylim(c(0,2)) + 
+  theme_mikabr() 
+```
+
+Model. 
+
+```{r}
+xpos_data <- d %>%
+  filter(group == "experts", 
+         expt == "single task",
+         condition %in% c("in play",
+                          "out of play")) %>%
+  mutate(x_pos_normalized = -X_pos / n_col)
+
+kable(summary(lmer(log(RT) ~ trial_num + 
+                     VF * factor(n_col) + 
+                     (1 | subnum),  data = xpos_data))$coefficients, 
+              digits = 3)
+```
+
